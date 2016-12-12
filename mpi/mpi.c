@@ -15,6 +15,7 @@
 #define TAG_WORK       42
 #define TAG_SIZE       43
 #define BUFFSIZE       16777216 // 16 MiB
+#define CORRECTION     20
 
 /* Use short int instead unsigned char so that we can store negative values. */
 typedef short int pixel_t;
@@ -250,48 +251,6 @@ is_power_of_two(const int x)
   return ((x != 0) && (x != 1) && !(x & (x - 1)));
 }
 
-static bool
-is_perfect_square(const int x)
-{
-  int root = sqrt(x);
-
-  return root * root == x;
-}
-
-static void
-frame_get_block(const uint8_t *frame,
-                const int      width,
-                const int      y_id,
-                const int      x_id,
-                const int      y_step,
-                const int      x_step,
-                uint8_t       *block)
-{
-  int i, j, k = 0;
-
-  for (i = y_id * y_step; i < (y_id + 1) * y_step; i++) {
-    for (j = x_id * x_step; j < (x_id + 1) * x_step; j++)
-      block[k++] = frame[i * width + j];
-  }
-}
-
-static void
-frame_set_block(uint8_t       *frame,
-                const int      width,
-                const int      y_id,
-                const int      x_id,
-                const int      y_step,
-                const int      x_step,
-                const uint8_t *block)
-{
-  int i, j, k = 0;
-
-  for (i = y_id * y_step; i < (y_id + 1) * y_step; i++) {
-    for (j = x_id * x_step; j < (x_id + 1) * x_step; j++)
-      frame[i * width + j] = block[k++];
-  }
-}
-
 int main(int argc, char **argv)
 {
   const char *file_in;
@@ -302,7 +261,7 @@ int main(int argc, char **argv)
   MPI_Status status;
 
   uint8_t *buffer;
-  int size_buffer[2];
+  int size_buffer[4];
 
   struct timespec start, end;
   double time_per_frame, computational_time = 0;
@@ -328,9 +287,8 @@ int main(int argc, char **argv)
     DeContext *context;
     DeFrame *frame = NULL;
     int got_frame = 0;
-    int x_blocks, y_blocks;
-    int x_step, y_step;
-    int i, j, worker_id;
+    int chunk_height, chunk_size, chunk_start, chunk_size_edge;
+    int i, worker_id;
 
     context = de_context_create (file_in);
     de_context_prepare_encoding (context, file_out);
@@ -350,37 +308,50 @@ int main(int argc, char **argv)
       if (got_frame && frame) {
         DIE(clock_gettime (CLOCK_MONOTONIC, &start) == -1, "clock_gettime");
 
-        if (is_perfect_square(num_workers)) {
-          x_blocks = y_blocks = (int)sqrt(num_workers);
-        } else {
-          x_blocks = 2;
-          y_blocks = num_workers / 2;
-        }
+        chunk_height = frame->height / num_workers;
+        chunk_start = (chunk_height - CORRECTION) * frame->width;
+        chunk_size = (chunk_height + CORRECTION * 2) * frame->width;
+        chunk_size_edge = (chunk_height + CORRECTION) * frame->width;
 
-        x_step = frame->width / x_blocks;
-        y_step = frame->height / y_blocks;
+        size_buffer[0] = frame->width;
+        size_buffer[1] = chunk_height + CORRECTION;
 
-        size_buffer[0] = y_step;
-        size_buffer[1] = x_step;
+        /* Send to first worker */
+        MPI_Send(size_buffer, 2, MPI_INT, 0, TAG_SIZE, MPI_COMM_WORLD);
+        memcpy(buffer, frame->data + 0, chunk_size_edge);
+        MPI_Send(buffer, chunk_size_edge, MPI_UNSIGNED_CHAR, 0, TAG_WORK, MPI_COMM_WORLD);
+
+        /* Send to last worker */
+        MPI_Send(size_buffer, 2, MPI_INT, num_workers - 1, TAG_SIZE, MPI_COMM_WORLD);
+        memcpy(buffer, frame->data + ((num_workers - 1) * chunk_start), chunk_size_edge);
+        MPI_Send(buffer, chunk_size_edge, MPI_UNSIGNED_CHAR, num_workers - 1, TAG_WORK, MPI_COMM_WORLD);
+
+        size_buffer[1] = chunk_height + CORRECTION * 2;
 
         /* Split the frame in blocks and send one block to each worker. */
-        worker_id = 0;
-        for (i = 0; i < y_blocks; i++) {
-          for (j = 0; j < x_blocks; j++) {
-            /* Send the block width and height. */
-            MPI_Send(size_buffer, 2, MPI_INT, worker_id, TAG_SIZE, MPI_COMM_WORLD);
+        for (i = 1; i < num_workers - 1; i++) {
+            MPI_Send(size_buffer, 2, MPI_INT, i, TAG_SIZE, MPI_COMM_WORLD);
 
             /* Send the actual block. */
-            frame_get_block(frame->data, frame->width, i, j, y_step, x_step, buffer);
-            MPI_Send(buffer, x_step * y_step, MPI_UNSIGNED_CHAR, worker_id++, TAG_WORK, MPI_COMM_WORLD);
-          }
+            memcpy(buffer, frame->data + (i * chunk_start), chunk_size);
+            MPI_Send(buffer, chunk_size, MPI_UNSIGNED_CHAR, i, TAG_WORK, MPI_COMM_WORLD);
         }
 
+        /* Get from first worker */
+        printf("Receiving from first\n");
+        MPI_Recv(buffer, chunk_size_edge, MPI_UNSIGNED_CHAR, 0, TAG_WORK, MPI_COMM_WORLD, &status);
+        memcpy(frame->frame->data[0] + 0, buffer, frame->width * chunk_height);
+
+        /* Get from last worker */
+        MPI_Recv(buffer, chunk_size_edge, MPI_UNSIGNED_CHAR, num_workers - 1, TAG_WORK, MPI_COMM_WORLD, &status);
+        memcpy(frame->frame->data[0] + ((num_workers - 1) * frame->width * chunk_height), buffer + frame->width * CORRECTION, frame->width * chunk_height);
+
         /* Receive the computed blocks from workers. */
-        for (i = 0; i < num_workers; i++) {
-          MPI_Recv(buffer, x_step * y_step, MPI_UNSIGNED_CHAR, MPI_ANY_SOURCE, TAG_WORK, MPI_COMM_WORLD, &status);
+        for (i = 1; i < num_workers - 1; i++) {
+          MPI_Recv(buffer, chunk_size, MPI_UNSIGNED_CHAR, MPI_ANY_SOURCE, TAG_WORK, MPI_COMM_WORLD, &status);
           worker_id = status.MPI_SOURCE;
-          frame_set_block(frame->frame->data[0], frame->width, worker_id / x_blocks, worker_id % x_blocks, y_step, x_step, buffer);
+
+          memcpy(frame->frame->data[0] + (worker_id * frame->width * chunk_height), buffer + frame->width * CORRECTION, frame->width * chunk_height);
         }
 
         DIE(clock_gettime (CLOCK_MONOTONIC, &end) == -1, "clock_gettime");
@@ -404,8 +375,8 @@ int main(int argc, char **argv)
       /* Receive the block's width and height. */
       MPI_Recv(size_buffer, 2, MPI_INT, master_id, TAG_SIZE, MPI_COMM_WORLD, &status);
 
-      block_height = size_buffer[0];
-      block_width = size_buffer[1];
+      block_width = size_buffer[0];
+      block_height = size_buffer[1];
 
       /* Job is done. */
       if (block_height == 0 && block_width == 0)
