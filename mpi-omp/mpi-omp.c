@@ -10,6 +10,10 @@
 #include "utils.h"
 
 #define MAX_BRIGHTNESS 255
+#define CANNY_LOWER 45
+#define CANNY_UPPER 50
+#define CANNY_SIGMA 1.0
+
 #define TAG_WORK       42
 #define TAG_SIZE       43
 #define BUFFSIZE       16777216 // 16 MiB
@@ -242,11 +246,12 @@ canny_edge_detection(const uint8_t *in,
 static void
 print_usage(const char *argv0)
 {
-  fprintf(stderr, "Usage: mpirun -np <NUM> %s <IN_FILE> [OUT_FILE]\n", argv0);
+  fprintf(stderr, "Usage: mpirun -np <NUM> %s <IN.mpg> [OUT.mpg]\n", argv0);
   fprintf(stderr, "Required arguments:\n"
-                  "  <IN_FILE>\tthe input video file\n"
+                  "  <IN.mpg>\tthe input video file\n"
+                  "  <NUM>\t\tthe number of threads\n"
                   "Optional arguments:\n"
-                  "  [OUT_FILE]\t\tthe output video file\n");
+                  "  [OUT.mpg]\tthe output video file\n");
 }
 
 static bool
@@ -271,16 +276,16 @@ int main(int argc, char **argv)
   double time_per_frame, computational_time = 0;
 
   if (argc < 2 || argc > 3) {
-    print_usage (argv[0]);
-    exit (1);
+    print_usage(argv[0]);
+    exit(1);
   }
 
   file_in = argv[1];
   file_out = argc == 3 ? argv[2] : "out.mpg";
 
-  MPI_Init (&argc, &argv);
-  MPI_Comm_size (MPI_COMM_WORLD, &num_tasks);
-  MPI_Comm_rank (MPI_COMM_WORLD, &rank);
+  MPI_Init(&argc, &argv);
+  MPI_Comm_size(MPI_COMM_WORLD, &num_tasks);
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   master_id = num_workers = num_tasks - 1;
   assert(is_power_of_two(num_workers));
@@ -294,23 +299,23 @@ int main(int argc, char **argv)
     int chunk_height, chunk_size, chunk_start, chunk_size_edge;
     int i, worker_id;
 
-    context = de_context_create (file_in);
-    de_context_prepare_encoding (context, file_out);
+    context = de_context_create(file_in);
+    de_context_prepare_encoding(context, file_out);
 
     do {
-      frame = de_context_get_next_frame (context, &got_frame);
+      frame = de_context_get_next_frame(context, &got_frame);
 
       if (got_frame == -1) {
         size_buffer[0] = size_buffer[1] = 0;
 
         for (i = 0; i < num_workers; i++)
-          MPI_Send (size_buffer, 2, MPI_INT, i, TAG_SIZE, MPI_COMM_WORLD);
+          MPI_Send(size_buffer, 2, MPI_INT, i, TAG_SIZE, MPI_COMM_WORLD);
 
         break;
       }
 
       if (got_frame && frame) {
-        DIE(clock_gettime (CLOCK_MONOTONIC, &start) == -1, "clock_gettime");
+        DIE(clock_gettime(CLOCK_MONOTONIC, &start) == -1, "clock_gettime");
 
         chunk_height = frame->height / num_workers;
         chunk_start = (chunk_height - CORRECTION) * frame->width;
@@ -358,19 +363,19 @@ int main(int argc, char **argv)
           memcpy(frame->frame->data[0] + (worker_id * frame->width * chunk_height), buffer + frame->width * CORRECTION, frame->width * chunk_height);
         }
 
-        DIE(clock_gettime (CLOCK_MONOTONIC, &end) == -1, "clock_gettime");
+        DIE(clock_gettime(CLOCK_MONOTONIC, &end) == -1, "clock_gettime");
 
         time_per_frame = end.tv_sec - start.tv_sec + (end.tv_nsec - start.tv_nsec) / 1000000000.0;
         printf("[%d] Time per frame: %lf\n", rank, time_per_frame);
         computational_time += time_per_frame;
 
-        de_context_set_next_frame (context, frame);
+        de_context_set_next_frame(context, frame);
       }
     } while (1);
 
     printf("[%d] Computational time: %lf\n", rank, computational_time);
 
-    de_context_end_encoding (context);
+    de_context_end_encoding(context);
   } else {
     int block_width, block_height;
 
@@ -390,16 +395,20 @@ int main(int argc, char **argv)
       MPI_Recv(buffer, block_width * block_height, MPI_UNSIGNED_CHAR, master_id, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 
       /* Apply canny edge detection. */
-      uint8_t *jarjar = canny_edge_detection(buffer, block_width, block_height, 45, 50, 1.0f, num_workers);
+      uint8_t *computed = canny_edge_detection(buffer, block_width, block_height,
+                                               CANNY_LOWER, CANNY_UPPER, CANNY_SIGMA,
+                                               num_workers);
 
       /* Send the block back to master. */
-      MPI_Send(jarjar, block_width * block_height, MPI_UNSIGNED_CHAR, master_id, TAG_WORK, MPI_COMM_WORLD);
+      MPI_Send(computed, block_width * block_height, MPI_UNSIGNED_CHAR, master_id, TAG_WORK, MPI_COMM_WORLD);
+
+      free(computed);
     }
   }
 
   free(buffer);
 
-  MPI_Finalize ();
+  MPI_Finalize();
 
   return 0;
 }

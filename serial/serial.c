@@ -8,6 +8,9 @@
 #include "utils.h"
 
 #define MAX_BRIGHTNESS 255
+#define CANNY_LOWER 45
+#define CANNY_UPPER 50
+#define CANNY_SIGMA 1.0
 
 /* Use short int instead unsigned char so that we can store negative values. */
 typedef short int pixel_t;
@@ -227,6 +230,16 @@ canny_edge_detection(const uint8_t *in,
   return retval;
 }
 
+static void
+print_usage(const char *argv0)
+{
+  fprintf(stderr, "Usage: %s <IN.mpg> [OUT.mpg]\n", argv0);
+  fprintf(stderr, "Required arguments:\n"
+                  "  <IN.mpg>\tthe input video file\n"
+                  "Optional arguments:\n"
+                  "  [OUT.mpg]\tthe output video file\n");
+}
+
 int main(int argc, char **argv)
 {
   const char *file_in;
@@ -239,40 +252,38 @@ int main(int argc, char **argv)
   struct timespec start, end;
   double time_per_frame, computational_time = 0;
 
-  if (argc == 2) {
-    file_in = argv[1];
-    file_out = "out.mpg";
-  } else if (argc == 3) {
-    file_in = argv[1];
-    file_out = argv[2];
-  } else {
-    printf("Usage: %s in.mpg [out.mpg]\n", argv[0]);
+  if (argc < 2 || argc > 3) {
+    print_usage(argv[0]);
     exit(1);
   }
 
-  context = de_context_create (file_in);
-  de_context_prepare_encoding (context, file_out);
+  file_in = argv[1];
+  file_out = argc == 3 ? argv[2] : "out.mpg";
+
+  context = de_context_create(file_in);
+  de_context_prepare_encoding(context, file_out);
 
   do {
-    frame = de_context_get_next_frame (context, &got_frame);
+    frame = de_context_get_next_frame(context, &got_frame);
 
     if (got_frame == -1)
       break;
 
     if (got_frame && frame) {
-      DIE(clock_gettime (CLOCK_MONOTONIC, &start) == -1, "clock_gettime");
-      frame->frame->data[0] = canny_edge_detection(frame->data, frame->width, frame->height, 45, 50, 1.0f);
-      DIE(clock_gettime (CLOCK_MONOTONIC, &end) == -1, "clock_gettime");
+      DIE(clock_gettime(CLOCK_MONOTONIC, &start) == -1, "clock_gettime");
+      frame->frame->data[0] = canny_edge_detection(frame->data, frame->width, frame->height,
+                                                   CANNY_LOWER, CANNY_UPPER, CANNY_SIGMA);
+      DIE(clock_gettime(CLOCK_MONOTONIC, &end) == -1, "clock_gettime");
 
       time_per_frame = end.tv_sec - start.tv_sec + (end.tv_nsec - start.tv_nsec) / 1000000000.0;
       printf("Time per frame: %lf\n", time_per_frame);
       computational_time += time_per_frame;
 
-      de_context_set_next_frame (context, frame);
+      de_context_set_next_frame(context, frame);
     }
   } while (1);
 
-  de_context_end_encoding (context);
+  de_context_end_encoding(context);
 
   printf("Computational time: %lf\n", computational_time);
 

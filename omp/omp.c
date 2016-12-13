@@ -9,6 +9,9 @@
 #include "utils.h"
 
 #define MAX_BRIGHTNESS 255
+#define CANNY_LOWER 45
+#define CANNY_UPPER 50
+#define CANNY_SIGMA 1.0
 
 /* Use short int instead unsigned char so that we can store negative values. */
 typedef short int pixel_t;
@@ -234,6 +237,17 @@ canny_edge_detection(const uint8_t *in,
   return retval;
 }
 
+static void
+print_usage(const char *argv0)
+{
+  fprintf(stderr, "Usage: %s <IN.mpg> <NUM> [OUT.mpg]\n", argv0);
+  fprintf(stderr, "Required arguments:\n"
+                  "  <IN.mpg>\tthe input video file\n"
+                  "  <NUM>\t\tthe number of threads\n"
+                  "Optional arguments:\n"
+                  "  [OUT.mpg]\tthe output video file\n");
+}
+
 int main(int argc, char **argv)
 {
   const char *file_in;
@@ -247,44 +261,40 @@ int main(int argc, char **argv)
   double start, end;
   double time_per_frame, computational_time = 0;
 
-  if (argc == 3) {
-    file_in = argv[1];
-    nthreads = atoi(argv[2]);
-    file_out = "out.mpg";
-  } else if (argc == 4) {
-    file_in = argv[1];
-    nthreads = atoi(argv[2]);
-    file_out = argv[3];
-  } else {
-    printf("Usage: %s in.mpg nthreads [out.mpg]\n", argv[0]);
+  if (argc < 3 || argc > 4) {
+    print_usage(argv[0]);
     exit(1);
   }
 
-  context = de_context_create (file_in);
-  de_context_prepare_encoding (context, file_out);
+  file_in = argv[1];
+  nthreads = atoi(argv[2]);
+  file_out = argc == 4 ? argv[3] : "out.mpg";
+
+  context = de_context_create(file_in);
+  de_context_prepare_encoding(context, file_out);
 
   do {
-    frame = de_context_get_next_frame (context, &got_frame);
+    frame = de_context_get_next_frame(context, &got_frame);
 
     if (got_frame == -1)
       break;
 
     if (got_frame && frame) {
-      start = omp_get_wtime ();
+      start = omp_get_wtime();
       frame->frame->data[0] = canny_edge_detection(frame->data, frame->width, frame->height,
-                                                   45, 50, 1.0f,
+                                                   CANNY_LOWER, CANNY_UPPER, CANNY_SIGMA,
                                                    nthreads);
-      end = omp_get_wtime ();
+      end = omp_get_wtime();
 
       time_per_frame = end - start;
       printf("Time per frame: %lf\n", time_per_frame);
       computational_time += time_per_frame;
 
-      de_context_set_next_frame (context, frame);
+      de_context_set_next_frame(context, frame);
     }
   } while (1);
 
-  de_context_end_encoding (context);
+  de_context_end_encoding(context);
 
   printf("Computational time: %lf\n", computational_time);
 

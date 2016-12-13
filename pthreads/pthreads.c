@@ -9,6 +9,9 @@
 #include "utils.h"
 
 #define MAX_BRIGHTNESS 255
+#define CANNY_LOWER 45
+#define CANNY_UPPER 50
+#define CANNY_SIGMA 1.0
 
 /* Use short int instead unsigned char so that we can store negative values. */
 typedef short int pixel_t;
@@ -300,9 +303,16 @@ thread_function(void *thread_arg)
   block = malloc(arg->y_step * arg->x_step * sizeof(uint8_t));
   DIE(block == NULL, "malloc");
 
-  frame_get_block(frame->data, frame->width, arg->y_id, arg->x_id, arg->y_step, arg->x_step, block);
-  block_ced = canny_edge_detection(block, arg->x_step, arg->y_step, 45, 50, 1.0f);
-  frame_set_block(frame->frame->data[0], frame->width, arg->y_id, arg->x_id, arg->y_step, arg->x_step, block_ced);
+  frame_get_block(frame->data, frame->width,
+                  arg->y_id, arg->x_id,
+                  arg->y_step, arg->x_step,
+                  block);
+  block_ced = canny_edge_detection(block, arg->x_step, arg->y_step,
+                                   CANNY_LOWER, CANNY_UPPER, CANNY_SIGMA);
+  frame_set_block(frame->frame->data[0], frame->width,
+                  arg->y_id, arg->x_id,
+                  arg->y_step, arg->x_step,
+                  block_ced);
 
   free(block);
   free(block_ced);
@@ -311,13 +321,14 @@ thread_function(void *thread_arg)
 }
 
 static void
-print_usage(char *argv0)
+print_usage(const char *argv0)
 {
-  fprintf(stderr, "Usage: %s <IN_FILE> <NUM> [OUT_FILE]\n", argv0);
+  fprintf(stderr, "Usage: %s <IN.mpg> <NUM> [OUT.mpg]\n", argv0);
   fprintf(stderr, "Required arguments:\n"
-                  "  <IN_FILE>\tthe input video file\n"
+                  "  <IN.mpg>\tthe input video file\n"
+                  "  <NUM>\t\tthe number of threads\n"
                   "Optional arguments:\n"
-                  "  [OUT_FILE]\t\tthe output video file\n");
+                  "  [OUT.mpg]\tthe output video file\n");
 }
 
 int main(int argc, char **argv)
@@ -348,17 +359,17 @@ int main(int argc, char **argv)
   thread_arg_t args[nthreads];
   pthread_t threads[nthreads];
 
-  context = de_context_create (file_in);
-  de_context_prepare_encoding (context, file_out);
+  context = de_context_create(file_in);
+  de_context_prepare_encoding(context, file_out);
 
   do {
-    frame = de_context_get_next_frame (context, &got_frame);
+    frame = de_context_get_next_frame(context, &got_frame);
 
     if (got_frame == -1)
       break;
 
     if (got_frame && frame) {
-      DIE(clock_gettime (CLOCK_MONOTONIC, &start) == -1, "clock_gettime");
+      DIE(clock_gettime(CLOCK_MONOTONIC, &start) == -1, "clock_gettime");
 
       if (is_perfect_square(nthreads)) {
         x_blocks = y_blocks = (int)sqrt(nthreads);
@@ -382,8 +393,8 @@ int main(int argc, char **argv)
           args[tid].x_step = x_step;
 
           /* Launch the threads. */
-          ret = pthread_create (&threads[tid], NULL, &thread_function, &args[tid]);
-          DIE (ret != 0, "pthread_create");
+          ret = pthread_create(&threads[tid], NULL, &thread_function, &args[tid]);
+          DIE(ret != 0, "pthread_create");
 
           tid++;
         }
@@ -391,21 +402,21 @@ int main(int argc, char **argv)
 
       /* Wait for all the threads to complete execution. */
       for (tid = 0; tid < nthreads; tid++) {
-        ret = pthread_join (threads[tid], NULL);
-        DIE (ret != 0, "pthread_join");
+        ret = pthread_join(threads[tid], NULL);
+        DIE(ret != 0, "pthread_join");
       }
 
-      DIE(clock_gettime (CLOCK_MONOTONIC, &end) == -1, "clock_gettime");
+      DIE(clock_gettime(CLOCK_MONOTONIC, &end) == -1, "clock_gettime");
 
       time_per_frame = end.tv_sec - start.tv_sec + (end.tv_nsec - start.tv_nsec) / 1000000000.0;
       printf("Time per frame: %lf\n", time_per_frame);
       computational_time += time_per_frame;
 
-      de_context_set_next_frame (context, frame);
+      de_context_set_next_frame(context, frame);
     }
   } while (1);
 
-  de_context_end_encoding (context);
+  de_context_end_encoding(context);
 
   printf("Computational time: %lf\n", computational_time);
 
