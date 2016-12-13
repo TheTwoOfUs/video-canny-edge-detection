@@ -1,6 +1,3 @@
 [submodule "libde"]
 	path = libde
 	url = git@github.com:iulianR/libde.git
-[submodule "libraries"]
-	path = libraries
-	url = https://github.com/iulianR/ffmpeg-shared-object-files
