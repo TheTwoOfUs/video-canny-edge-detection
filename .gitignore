@@ -1,0 +1,12 @@
+# Object files
+*.o
+
+# Executables
+serial
+omp
+mpi
+pthreads
+mpi-omp
+
+# Output files
+out.mpg
