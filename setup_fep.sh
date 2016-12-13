@@ -29,11 +29,6 @@ if [ "$DISTRO" == "CentOS" ]; then
         mv "$lib"?raw=true libraries/"$lib"
         chmod +x libraries/"$lib"
     done
-
-    # Download libde.
-    rm -rf lidbe
-    wget https://github.com/iulianR/libde/archive/master.zip && unzip master.zip
-    rm -f master.zip && mv libde-master libde
 else
     echo -e "$ERR_MSG"
     exit 1
