@@ -12,21 +12,21 @@
 #define CANNY_LOWER 45
 #define CANNY_UPPER 50
 #define CANNY_SIGMA 1.0
+#define CORRECTION 20
 
 /* Use short int instead unsigned char so that we can store negative values. */
 typedef short int pixel_t;
 
 typedef struct {
   int id;
-  int y_id;
-  int x_id;
-  int y_step;
-  int x_step;
+  int offset;
+  int my_height;
 } thread_arg_t;
 
 /* Global shared variables. */
 DeContext *context = NULL;
 DeFrame *frame = NULL;
+int chunk_height;
 
 /*
  * If normalize is true, then map pixels to range 0 -> MAX_BRIGHTNESS.
@@ -243,79 +243,27 @@ canny_edge_detection(const uint8_t *in,
   return retval;
 }
 
-static bool
-is_power_of_two(const int x)
-{
-  return ((x != 0) && (x != 1) && !(x & (x - 1)));
-}
-
-static bool
-is_perfect_square(const int x)
-{
-  int root = sqrt(x);
-
-  return root * root == x;
-}
-
-static void
-frame_get_block(const uint8_t *frame,
-                const int      width,
-                const int      y_id,
-                const int      x_id,
-                const int      y_step,
-                const int      x_step,
-                uint8_t       *block)
-{
-  int i, j, k = 0;
-
-  for (i = y_id * y_step; i < (y_id + 1) * y_step; i++) {
-    for (j = x_id * x_step; j < (x_id + 1) * x_step; j++)
-      block[k++] = frame[i * width + j];
-  }
-}
-
-static void
-frame_set_block(uint8_t       *frame,
-                const int      width,
-                const int      y_id,
-                const int      x_id,
-                const int      y_step,
-                const int      x_step,
-                const uint8_t *block)
-{
-  int i, j, k = 0;
-
-  for (i = y_id * y_step; i < (y_id + 1) * y_step; i++) {
-    for (j = x_id * x_step; j < (x_id + 1) * x_step; j++)
-      frame[i * width + j] = block[k++];
-  }
-}
-
 static void *
 thread_function(void *thread_arg)
 {
   thread_arg_t *arg;
   uint8_t *block;
-  uint8_t *block_ced;
 
   arg = (thread_arg_t *) thread_arg;
 
-  block = malloc(arg->y_step * arg->x_step * sizeof(uint8_t));
-  DIE(block == NULL, "malloc");
+  block = canny_edge_detection(frame->data + arg->offset,
+                               frame->width, arg->my_height,
+                               CANNY_LOWER, CANNY_UPPER, CANNY_SIGMA);
 
-  frame_get_block(frame->data, frame->width,
-                  arg->y_id, arg->x_id,
-                  arg->y_step, arg->x_step,
-                  block);
-  block_ced = canny_edge_detection(block, arg->x_step, arg->y_step,
-                                   CANNY_LOWER, CANNY_UPPER, CANNY_SIGMA);
-  frame_set_block(frame->frame->data[0], frame->width,
-                  arg->y_id, arg->x_id,
-                  arg->y_step, arg->x_step,
-                  block_ced);
+  if (arg->id == 0) {
+    memcpy(frame->frame->data[0], block, frame->width * chunk_height);
+  } else {
+    memcpy(frame->frame->data[0] + (arg->id * frame->width * chunk_height),
+           block + frame->width * CORRECTION,
+           frame->width * chunk_height);
+  }
 
   free(block);
-  free(block_ced);
 
   return NULL;
 }
@@ -337,10 +285,7 @@ int main(int argc, char **argv)
   const char *file_out;
 
   int got_frame = 0;
-  int ret, nthreads;
-  int x_blocks, y_blocks;
-  int x_step, y_step;
-  int tid, i, j;
+  int i, ret, nthreads, chunk_start;
 
   struct timespec start, end;
   double time_per_frame, computational_time = 0;
@@ -353,8 +298,6 @@ int main(int argc, char **argv)
   file_in = argv[1];
   nthreads = atoi(argv[2]);
   file_out = argc == 4 ? argv[3] : "out.mpg";
-
-  assert(is_power_of_two(nthreads));
 
   thread_arg_t args[nthreads];
   pthread_t threads[nthreads];
@@ -371,38 +314,35 @@ int main(int argc, char **argv)
     if (got_frame && frame) {
       DIE(clock_gettime(CLOCK_MONOTONIC, &start) == -1, "clock_gettime");
 
-      if (is_perfect_square(nthreads)) {
-        x_blocks = y_blocks = (int)sqrt(nthreads);
-      } else {
-        x_blocks = 2;
-        y_blocks = nthreads / 2;
+      chunk_height = frame->height / nthreads;
+      chunk_start = (chunk_height - CORRECTION) * frame->width;
+
+      /* Divide the work to the first thread. */
+      args[0].id = 0;
+      args[0].offset = 0;
+      args[0].my_height = chunk_height + CORRECTION;
+
+      /* Divide the work to the last thread. */
+      args[nthreads - 1].id = nthreads - 1;
+      args[nthreads - 1].offset = (nthreads - 1) * chunk_start;
+      args[nthreads - 1].my_height = chunk_height + CORRECTION;
+
+      /* Divide the work to the remaining threads. */
+      for (i = 1; i < nthreads - 1; i++) {
+        args[i].id = i;
+        args[i].offset = i * chunk_start;
+        args[i].my_height = chunk_height + CORRECTION * 2;
       }
 
-      x_step = frame->width / x_blocks;
-      y_step = frame->height / y_blocks;
-
-      /* Divide the work to each thread. */
-      tid = 0;
-      for (i = 0; i < y_blocks; i++) {
-        for (j = 0; j < x_blocks; j++) {
-          /* The current thread gets the current block. */
-          args[tid].id = tid;
-          args[tid].y_id = i;
-          args[tid].x_id = j;
-          args[tid].y_step = y_step;
-          args[tid].x_step = x_step;
-
-          /* Launch the threads. */
-          ret = pthread_create(&threads[tid], NULL, &thread_function, &args[tid]);
-          DIE(ret != 0, "pthread_create");
-
-          tid++;
-        }
+      /* Launch the threads. */
+      for (i = 0; i < nthreads; i++) {
+        ret = pthread_create(&threads[i], NULL, &thread_function, &args[i]);
+        DIE(ret != 0, "pthread_create");
       }
 
       /* Wait for all the threads to complete execution. */
-      for (tid = 0; tid < nthreads; tid++) {
-        ret = pthread_join(threads[tid], NULL);
+      for (i = 0; i < nthreads; i++) {
+        ret = pthread_join(threads[i], NULL);
         DIE(ret != 0, "pthread_join");
       }
 
