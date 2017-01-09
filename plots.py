@@ -26,17 +26,19 @@ total_time_pthreads_eficiency = total_time_pthreads_scalability / numthreads
 TYPE_NONE = 0
 TYPE_SCALABILITY = 1
 TYPE_EFICIENCY = 2
+TYPE_FRAME_TIME = 3
 
 TITLE_OMP = 'OpenMP'
-TITLE_MPI = 'OpenMPI'
+TITLE_MPI = 'Open MPI'
 TITLE_PTHREADS = 'pthreads'
 
 SUBTITLE_TOTAL_TIME = 'Timp Total de Executie'
 SUBTITLE_SCALABILITY = 'Scalabilitatea'
 SUBTITLE_EFICIENCY = 'Eficienta'
+SUBTITLE_FRAME_TIME = 'Timp de Executie pe Frame'
 
 plots = [
-    [total_time_omp, TITLE_OMP, TYPE_NONE, 'omg.png'],
+    [total_time_omp, TITLE_OMP, TYPE_NONE, 'omp.png'],
     [total_time_mpi, TITLE_MPI, TYPE_NONE, 'mpi.png'],
     [total_time_pthreads, TITLE_PTHREADS, TYPE_NONE, 'pthreads.png'],
 
@@ -46,7 +48,11 @@ plots = [
 
     [total_time_omp_eficiency, TITLE_OMP, TYPE_EFICIENCY, 'omp_eficiency.png'],
     [total_time_mpi_eficiency, TITLE_MPI, TYPE_EFICIENCY, 'mpi_eficiency.png'],
-    [total_time_pthreads_eficiency, TITLE_PTHREADS, TYPE_EFICIENCY, 'pthreads_eficiency.png']
+    [total_time_pthreads_eficiency, TITLE_PTHREADS, TYPE_EFICIENCY, 'pthreads_eficiency.png'],
+
+    [frame_time_omp, TITLE_OMP, TYPE_FRAME_TIME, 'omp_frame_time.png'],
+    [frame_time_mpi, TITLE_MPI, TYPE_FRAME_TIME, 'mpi_frame_time.png'],
+    [frame_time_pthreads, TITLE_PTHREADS, TYPE_FRAME_TIME, 'pthreads_frame_time.png']
 ]
 
 def create_plot(fig_index, time, title, type, filename):
@@ -68,6 +74,9 @@ def create_plot(fig_index, time, title, type, filename):
     elif type == TYPE_EFICIENCY:
         plt.ylabel('E(n) = S(n) / n')
         plt.title(title + ' - ' + SUBTITLE_EFICIENCY)
+    elif type == TYPE_FRAME_TIME:
+        plt.ylabel('Timp (s)')
+        plt.title(title + ' - ' + SUBTITLE_FRAME_TIME)
 
     plt.grid(True)
     plt.savefig(filename)
@@ -75,8 +84,22 @@ def create_plot(fig_index, time, title, type, filename):
 def main():
     for i, plot in enumerate(plots):
         create_plot(i+1, plot[0], plot[1], plot[2], plot[3])
+    else:
+        fig = plt.figure(i+2)
+        ax = fig.add_subplot(111)
 
-    plt.show()
+        omp = plt.plot(numthreads, total_time_omp, label='OpenMP')
+        plt.hold(True)
+        mpi = plt.plot(numthreads, total_time_mpi, label='Open MPI')
+        pthreads = plt.plot(numthreads, total_time_pthreads, label='pthreads')
+
+        plt.xlabel('Numar thread-uri')
+        plt.ylabel('Timp (s)')
+        plt.legend()
+        plt.title('Comparatie')
+
+
+        plt.savefig("comparision.png")
 
 if __name__ == '__main__':
     main()
