@@ -23,8 +23,8 @@ frame_time_pthreads = np.array([7.037056, 3.943, 1.925, 1.293, 0.998, 0.829, 0.7
 total_time_pthreads_scalability = total_time_serial / total_time_pthreads
 total_time_pthreads_efficiency = total_time_pthreads_scalability / numthreads
 
-total_time_mpi_omp = np.array([941.751, 571.262, 309.834, 225.784, 188.145, 168.175, 151.594, 147.202, 136.023])
-frame_time_mpi_omp = np.array([7.037056, 3.943, 1.925, 1.293, 0.998, 0.829, 0.709, 0.649, 0.588])
+total_time_mpi_omp = np.array([941.751, 627.573, 338.469, 288.16, 281.583, 286.568, 298.561, 313.241, 338.822])
+frame_time_mpi_omp = np.array([7.037, 4.070, 1.795, 1.345, 1.244, 1.210, 1.264, 1.361, 1.439])
 total_time_mpi_omp_scalability = total_time_serial / total_time_mpi_omp
 total_time_mpi_omp_efficiency = total_time_mpi_omp_scalability / numthreads
 
@@ -102,6 +102,7 @@ def main():
         plt.hold(True)
         mpi = plt.plot(numthreads, total_time_mpi, label='Open MPI')
         pthreads = plt.plot(numthreads, total_time_pthreads, label='pthreads')
+        mpi_omp = plt.plot(numthreads, total_time_mpi_omp, label='mpi-omp')
 
         plt.xlabel('Numar thread-uri')
         plt.ylabel('Timp (s)')
