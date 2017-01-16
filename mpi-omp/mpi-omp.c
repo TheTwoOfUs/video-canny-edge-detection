@@ -254,12 +254,6 @@ print_usage(const char *argv0)
                   "  [OUT.mpg]\tthe output video file\n");
 }
 
-static bool
-is_power_of_two(const int x)
-{
-  return ((x != 0) && (x != 1) && !(x & (x - 1)));
-}
-
 int main(int argc, char **argv)
 {
   const char *file_in;
@@ -288,7 +282,6 @@ int main(int argc, char **argv)
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   master_id = num_workers = num_tasks - 1;
-  assert(is_power_of_two(num_workers));
 
   buffer = calloc(BUFFSIZE, sizeof(uint8_t));
 

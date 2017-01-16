@@ -3,9 +3,10 @@
 import sys
 from PIL import Image
 
-images_omp = map(Image.open, ['omp.png', 'omp_scalability.png', 'omp_eficiency.png', 'omp_frame_time.png'])
-images_mpi = map(Image.open, ['mpi.png', 'mpi_scalability.png', 'mpi_eficiency.png', 'mpi_frame_time.png'])
-images_pthreads = map(Image.open, ['pthreads.png', 'pthreads_scalability.png', 'pthreads_eficiency.png', 'pthreads_frame_time.png'])
+images_omp = map(Image.open, ['omp.png', 'omp_scalability.png', 'omp_efficiency.png', 'omp_frame_time.png'])
+images_mpi = map(Image.open, ['mpi.png', 'mpi_scalability.png', 'mpi_efficiency.png', 'mpi_frame_time.png'])
+images_pthreads = map(Image.open, ['pthreads.png', 'pthreads_scalability.png', 'pthreads_efficiency.png', 'pthreads_frame_time.png'])
+images_mpi_omp = map(Image.open, ['mpi_omp.png', 'mpi_omp_scalability.png', 'mpi_omp_efficiency.png', 'mpi_omp_frame_time.png'])
 
 def combine(images, filename):
     widths, heights = zip(*(i.size for i in images))
@@ -31,6 +32,7 @@ def main():
     combine(images_omp, 'omp_combined.png')
     combine(images_mpi, 'mpi_combined.png')
     combine(images_pthreads, 'pthreads_combined.png')
+    combine(images_mpi_omp, 'mpi_omp_combined.png')
 
 if __name__ == '__main__':
     main()
